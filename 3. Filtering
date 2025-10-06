@@ -1,0 +1,288 @@
+#####################################################################
+#####################################################################
+#### Librerie
+library(Seurat)
+library(DoubletFinder)
+library(tibble)
+library(celldex)
+library(SingleR)
+library(ggplot2)
+library(tidyverse)
+library(dplyr)
+library(DESeq2)
+library(limma)
+
+#### 1. Definisci data_dir
+data_dir <- "/home/utenteunifi/data/03_projects_open/pemfigoide_singlecell/10924853/"
+
+#### 2. Carica i Seurat objects
+load(file.path(data_dir, "seurat_objects.RData"))  # contiene seurat_objects
+
+#### 3. Cartella risultati Scrublet
+scrublet_dir <- file.path(data_dir, "scrublet_results")
+setwd(scrublet_dir)
+
+#### 4. Aggiunta metadati Scrublet e rimozione predicted doublets
+seurat_object_names <- names(seurat_objects)
+
+for (object_name in seurat_object_names) {
+  doublet_score_file <- file.path(scrublet_dir, paste0(object_name, "_doublet_scores.csv"))
+  
+  if (!file.exists(doublet_score_file)) {
+    warning(paste("File not found:", doublet_score_file, "- skipping"))
+    next
+  }
+  
+  doublet_scores <- read.csv(doublet_score_file)
+  
+  if (nrow(doublet_scores) != ncol(seurat_objects[[object_name]])) {
+    stop(paste("Mismatch righe/celle in:", object_name))
+  }
+  
+  seurat_objects[[object_name]] <- AddMetaData(
+    object = seurat_objects[[object_name]],
+    metadata = doublet_scores$DoubletScore,
+    col.name = "DoubletScore"
+  )
+  
+  seurat_objects[[object_name]] <- AddMetaData(
+    object = seurat_objects[[object_name]],
+    metadata = as.logical(doublet_scores$PredictedDoublet),
+    col.name = "PredictedDoublet"
+  )
+  
+  # Rimozione celle predette come doublets
+  seu_obj <- seurat_objects[[object_name]]
+  if (any(seu_obj$PredictedDoublet)) {
+    seu_obj <- subset(seu_obj, subset = PredictedDoublet == FALSE)
+  }
+  seurat_objects[[object_name]] <- seu_obj
+}
+
+#### 5. Filtraggio cellule mitocondriali (percent.mt <= 10)
+for (object_name in names(seurat_objects)) {
+  seu_obj <- seurat_objects[[object_name]]
+  
+  seu_obj[["percent.mt"]] <- PercentageFeatureSet(seu_obj, pattern = "^MT-")
+  seu_obj_filtered <- subset(seu_obj, subset = percent.mt <= 10)
+  
+  seurat_objects[[object_name]] <- seu_obj_filtered
+}
+
+#### 6. Funzione custom DoubletFinder
+run_doubletfinder_custom <- function(seu_sample_subset, multiplet_rate = NULL){
+  
+  print(paste0("Sample ", unique(seu_sample_subset[['orig.ident']]), '...........')) 
+  
+  if(is.null(multiplet_rate)){
+    multiplet_rates_10x <- data.frame(
+      'Multiplet_rate'= c(0.004, 0.008, 0.0160, 0.023, 0.031, 0.039, 0.046, 0.054, 0.061, 0.069, 0.076),
+      'Loaded_cells' = c(800, 1600, 3200, 4800, 6400, 8000, 9600, 11200, 12800, 14400, 16000),
+      'Recovered_cells' = c(500, 1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000)
+    )
+    
+    multiplet_rate <- multiplet_rates_10x %>%
+      filter(Recovered_cells < nrow(seu_sample_subset@meta.data)) %>%
+      slice(which.max(Recovered_cells)) %>%
+      pull(Multiplet_rate)
+    
+    print(paste('Setting multiplet rate to', multiplet_rate))
+  }
+  
+  sample <- NormalizeData(seu_sample_subset)
+  sample <- FindVariableFeatures(sample)
+  sample <- ScaleData(sample)
+  sample <- RunPCA(sample, nfeatures.print = 10)
+  
+  stdv <- sample[["pca"]]@stdev
+  percent_stdv <- (stdv/sum(stdv))*100
+  cumulative <- cumsum(percent_stdv)
+  co1 <- which(cumulative > 90 & percent_stdv < 5)[1]
+  co2 <- sort(which((percent_stdv[1:(length(percent_stdv)-1)] - percent_stdv[2:length(percent_stdv)]) > 0.1),
+              decreasing = T)[1] + 1
+  min_pc <- min(co1, co2)
+  
+  sample <- RunUMAP(sample, dims = 1:min_pc)
+  sample <- FindNeighbors(sample, dims = 1:min_pc)
+  sample <- FindClusters(sample, resolution = 0.1)
+  
+  return(sample)
+}
+
+#### 7. Applicazione DoubletFinder
+doublet_results <- list()
+for (name in names(seurat_objects)) {
+  seurat_obj <- seurat_objects[[name]]
+  doublet_results[[name]] <- run_doubletfinder_custom(seurat_obj)
+  print(paste("DoubletFinder completato per", name))
+}
+
+#### 8. Salvataggio oggetti finali filtrati
+output_dir <- file.path(data_dir, "Seurat_mitoFiltered")
+dir.create(output_dir, showWarnings = FALSE)
+
+for (name in names(seurat_objects)) {
+  saveRDS(seurat_objects[[name]], file = file.path(output_dir, paste0(name, "_final.rds")))
+}
+
+save(seurat_objects, file = file.path(output_dir, "seurat_objects_final.RData"))
+
+cat("Processing complete. All Seurat objects filtered and saved in:", output_dir, "\n")
+
+
+#####################################################################
+#### DoubletFinder - Workflow coerente
+#####################################################################
+
+# Librerie necessarie
+library(Seurat)
+library(DoubletFinder)
+library(dplyr)
+library(tibble)
+
+#### Funzione custom DoubletFinder
+run_doubletfinder_custom <- function(seu_sample_subset, multiplet_rate = NULL){
+  
+  print(paste0("Sample ", unique(seu_sample_subset[['orig.ident']]), '...........')) 
+  
+  if(is.null(multiplet_rate)){
+    print('multiplet_rate not provided....... estimating multiplet rate from cells in dataset')
+    
+    multiplet_rates_10x <- data.frame(
+      'Multiplet_rate'= c(0.004, 0.008, 0.0160, 0.023, 0.031, 0.039, 0.046, 0.054, 0.061, 0.069, 0.076),
+      'Loaded_cells' = c(800, 1600, 3200, 4800, 6400, 8000, 9600, 11200, 12800, 14400, 16000),
+      'Recovered_cells' = c(500, 1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000)
+    )
+    
+    multiplet_rate <- multiplet_rates_10x %>%
+      dplyr::filter(Recovered_cells < nrow(seu_sample_subset@meta.data)) %>%
+      dplyr::slice(which.max(Recovered_cells)) %>%
+      dplyr::pull(Multiplet_rate)
+    
+    print(paste('Setting multiplet rate to', multiplet_rate))
+  }
+  # Pre-process Seurat
+  sample <- NormalizeData(seu_sample_subset)
+  sample <- FindVariableFeatures(sample)
+  sample <- ScaleData(sample)
+  sample <- RunPCA(sample, nfeatures.print = 10)
+  
+  stdv <- sample[["pca"]]@stdev
+  percent_stdv <- (stdv / sum(stdv)) * 100
+  cumulative <- cumsum(percent_stdv)
+  co1 <- which(cumulative > 90 & percent_stdv < 5)[1]
+  co2 <- sort(which((percent_stdv[1:(length(percent_stdv)-1)] - percent_stdv[2:length(percent_stdv)]) > 0.1),
+              decreasing = TRUE)[1] + 1
+  min_pc <- min(co1, co2)
+  
+  sample <- RunUMAP(sample, dims = 1:min_pc)
+  sample <- FindNeighbors(sample, dims = 1:min_pc)
+  sample <- FindClusters(sample, resolution = 0.1)
+  
+  # Identificazione pK
+  sweep_list <- paramSweep(sample, PCs = 1:min_pc, sct = FALSE)
+  sweep_stats <- summarizeSweep(sweep_list)
+  bcmvn <- find.pK(sweep_stats)
+  optimal.pk <- bcmvn %>%
+    dplyr::filter(BCmetric == max(BCmetric, na.rm = TRUE)) %>%  # aggiunto na.rm per sicurezza
+    dplyr::pull(pK)
+  optimal.pk <- as.numeric(as.character(optimal.pk[1]))
+  
+  # Homotypic doublet proportion
+  annotations <- sample@meta.data$seurat_clusters
+  homotypic.prop <- modelHomotypic(annotations)
+  
+  nExp.poi <- round(multiplet_rate * nrow(sample@meta.data))
+  nExp.poi.adj <- round(nExp.poi * (1 - homotypic.prop))
+  
+  # Run DoubletFinder
+  sample <- doubletFinder(seu = sample,
+                          PCs = 1:min_pc,
+                          pK = optimal.pk,
+                          nExp = nExp.poi.adj)
+  
+  # Rinomina colonna metadata
+  colnames(sample@meta.data)[grepl('DF.classifications.*', colnames(sample@meta.data))] <- "doublet_finder"
+  
+  # Estrai metadata doublet
+  double_finder_res <- sample@meta.data['doublet_finder']
+  double_finder_res <- rownames_to_column(double_finder_res, "row_names")
+  
+  return(double_finder_res)
+}
+
+#### Applicazione DoubletFinder
+doublet_results <- list()
+for (name in names(seurat_objects)) {
+  seurat_obj <- seurat_objects[[name]]
+  doublet_results[[name]] <- run_doubletfinder_custom(seu_sample_subset = seurat_obj)
+  print(paste("DoubletFinder completed for", name))
+}
+
+#### Creazione lista separata filtrata
+seurat_objects_filtered <- list()
+for (name in names(seurat_objects)) {
+  seurat_obj <- seurat_objects[[name]]
+  doublet_res <- doublet_results[[name]]
+  
+  if (!is.null(doublet_res)) {
+    singlet_ids <- doublet_res$row_names[doublet_res$doublet_finder == "Singlet"]
+    seurat_objects_filtered[[name]] <- subset(seurat_obj, cells = singlet_ids)
+    print(paste("Filtered Seurat object for", name, "- Singlets retained:", length(singlet_ids)))
+  } else {
+    seurat_objects_filtered[[name]] <- seurat_obj
+    print(paste("No doublet results for", name, "- Original object retained."))
+  }
+}
+
+# Risultato finale
+seurat_objects_filtered
+
+###############################################################################
+#### LIBRERIE
+###############################################################################
+library(Seurat)
+library(harmony)
+library(ggplot2)
+library(dplyr)
+library(celldex)
+library(SingleR)
+library(Matrix)
+library(tibble)
+
+###############################################################################
+# PATH
+###############################################################################
+data_dir <- "/home/utenteunifi/data/03_projects_open/pemfigoide_singlecell/10924853/"
+filtered_dir <- file.path(data_dir, "Seurat_mitoFiltered")
+plot_dir <- file.path(filtered_dir, "plots")
+if(!dir.exists(filtered_dir)) dir.create(filtered_dir)
+if(!dir.exists(plot_dir)) dir.create(plot_dir)
+
+###############################################################################
+# CARICA OGGETTI FILTRATI
+###############################################################################
+load(file.path(filtered_dir, "seurat_objects_final.RData"))  # lista seurat_objects_filtered
+
+###############################################################################
+# 1. QC filtering per singolo oggetto
+###############################################################################
+for(nm in names(seurat_objects_filtered)) {
+  obj <- seurat_objects_filtered[[nm]]
+  
+  # Percentuale mitocondriali
+  obj[["percent.mt"]] <- PercentageFeatureSet(obj, pattern = "^MT-")
+  # Percentuale geni eritrocitari
+  obj[["percent.redcell"]] <- PercentageFeatureSet(obj, features = c("HBA1","HBA2","HBB"))
+  
+  # Filtra
+  obj <- subset(obj, subset = nFeature_RNA > 200 &
+                        nFeature_RNA > 10000 &
+                        percent.mt < 10 &
+                        percent.redcell < 10)
+  
+  message("After QC ", nm, ": cells=", ncol(obj))
+  
+  # Salva oggetto filtrato
+  seurat_objects_filtered[[nm]] <- obj
+}
