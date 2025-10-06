@@ -1,0 +1,111 @@
+####################################################################
+####################################################################
+#### DESeq x type cell + plot
+
+# ============================================================
+# Pseudobulk + DESeq2 per tutti i tipi cellulari
+# Compatibile Seurat v5
+# ============================================================
+
+library(Seurat)
+library(dplyr)
+library(stringr)
+library(DESeq2)
+library(ggplot2)
+
+# Carica i dati
+load("start_pseudobulk.RData")
+
+# Controllo colonne chiave
+stopifnot(all(c("orig.ident", "Condition", "celltype") %in% colnames(annotated@meta.data)))
+
+# Assicurati che Condition sia fattore con livelli corretti
+annotated$Condition <- factor(annotated$Condition, levels = c("HC", "BP"))
+
+# Lista dei tipi cellulari
+celltypes <- unique(annotated$celltype)
+cat("Tipi cellulari trovati:\n")
+print(celltypes)
+
+# Crea directory per output
+dir.create("DESeq_results", showWarnings = FALSE)
+dir.create("DESeq_plots", showWarnings = FALSE)
+
+# Funzione per una singola analisi DESeq
+run_deseq_for_celltype <- function(ct) {
+  cat("\n===============================\n")
+  cat("Analizzando celltype:", ct, "\n")
+  
+  # Subset per celltype
+  sub_obj <- subset(annotated, subset = celltype == ct)
+  
+  # Crea pseudobulk aggregando per campione + condizione
+  bulk <- AggregateExpression(
+    sub_obj,
+    return.seurat = TRUE,
+    assays = "RNA",
+    group.by = c("orig.ident", "Condition")
+  )
+  
+  # Conta cellule per campione
+  n_cells <- sub_obj@meta.data %>%
+    dplyr::count(orig.ident) %>%
+    rename(n_cells = n)
+  
+  # Aggiungi metadati
+  meta_bulk <- bulk@meta.data %>%
+    left_join(n_cells, by = "orig.ident")
+  bulk@meta.data <- meta_bulk
+  
+  # Grafico numero cellule per campione
+  p <- ggplot(meta_bulk, aes(x = orig.ident, y = n_cells, fill = Condition)) +
+    geom_bar(stat = "identity", color = "black") +
+    theme_classic() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    labs(title = paste("Numero di cellule -", ct),
+         x = "Campione", y = "Numero di cellule")
+  
+  ggsave(filename = paste0("DESeq_plots/counts_", ct, ".png"),
+         plot = p, width = 8, height = 6)
+  
+  # Matrice pseudobulk dei conteggi (Seurat v5)
+  counts_mat <- as.data.frame(GetAssayData(bulk, assay = "RNA", layer = "counts"))
+  
+  # DESeq2
+  dds <- DESeqDataSetFromMatrix(
+    countData = round(counts_mat),
+    colData = bulk@meta.data,
+    design = ~ Condition
+  )
+  
+  dds$Condition <- relevel(dds$Condition, ref = "HC")
+  
+  dds <- DESeq(dds)
+  res <- results(dds, contrast = c("Condition", "BP", "HC"))
+  
+  # Filtraggio DE
+  res <- na.omit(res)
+  filtered <- res[
+    res$padj < 0.1 & abs(res$log2FoldChange) > 0.58,
+  ]
+  
+  # Salva risultati
+  write.csv(as.data.frame(res),
+            file = paste0("DESeq_results/DESeq_", ct, "_all.csv"))
+  write.csv(as.data.frame(filtered),
+            file = paste0("DESeq_results/DESeq_", ct, "_filtered.csv"))
+  
+  cat(" → Finito celltype:", ct, "(", nrow(filtered), " geni significativi)\n")
+}
+
+# Loop su tutti i tipi cellulari
+for (ct in celltypes) {
+  tryCatch({
+    run_deseq_for_celltype(ct)
+  }, error = function(e) {
+    message("Errore su ", ct, ": ", e$message)
+  })
+}
+
+cat("\nAnalisi completata per tutti i tipi cellulari.\nRisultati in cartella 'DESeq_results/'\n")
+
