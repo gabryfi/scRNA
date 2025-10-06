@@ -1,0 +1,348 @@
+# 11. QC plots
+###############################################################################
+metadata <- merged_seurat@meta.data
+
+# Numero cellule per campione
+png(file.path(plot_dir, "QC_cell_counts.png"), width = 800, height = 600)
+print(
+  ggplot(metadata, aes(x = orig.ident, fill = orig.ident)) + 
+    geom_bar() +
+    theme_classic() +
+    theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1),
+          plot.title = element_text(hjust = 0.5, face = "bold")) +
+    ggtitle("Number of cells per sample")
+)
+dev.off()
+
+# UMI per cella
+png(file.path(plot_dir, "QC_UMI_density.png"), width = 800, height = 600)
+print(
+  ggplot(metadata, aes(x = nCount_RNA, color = orig.ident, fill = orig.ident)) + 
+    geom_density(alpha = 0.2) + 
+    scale_x_log10() + 
+    theme_classic() +
+    ylab("Cell density") +
+    geom_vline(xintercept = 1000) +
+    ggtitle("UMI counts per cell")
+)
+dev.off()
+
+# Genes per cell
+png(file.path(plot_dir, "QC_genes_density.png"), width = 800, height = 600)
+print(
+  ggplot(metadata, aes(x = nFeature_RNA, color = orig.ident, fill = orig.ident)) + 
+    geom_density(alpha = 0.2) + 
+    scale_x_log10() + 
+    theme_classic() +
+    geom_vline(xintercept = 500) +
+    ggtitle("Genes detected per cell")
+)
+dev.off()
+
+# Percentuale geni mitocondriali
+if("percent.mt" %in% colnames(metadata)) {
+  png(file.path(plot_dir, "QC_mito_percent.png"), width = 800, height = 600)
+  print(
+    ggplot(metadata, aes(x = percent.mt, color = orig.ident, fill = orig.ident)) +
+      geom_density(alpha = 0.2) +
+      theme_classic() +
+      geom_vline(xintercept = 10) +
+      ggtitle("Percent Mitochondrial Genes")
+  )
+  dev.off()
+}
+
+# Percentuale geni eritrocitari
+if("percent.redcell" %in% colnames(metadata)) {
+  png(file.path(plot_dir, "QC_redcell_percent.png"), width = 800, height = 600)
+  print(
+    ggplot(metadata, aes(x = percent.redcell, color = orig.ident, fill = orig.ident)) +
+      geom_density(alpha = 0.2) +
+      theme_classic() +
+      geom_vline(xintercept = 10) +
+      ggtitle("Percent Red Blood Cell Genes")
+  )
+  dev.off()
+}
+
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+
+
+########################################################
+######## PLOT POST FILTER (con cluster)
+
+
+library(ggplot2)
+library(dplyr)
+library(Seurat)
+
+metadata <- combined@meta.data
+
+# ----------------------------
+# QC: NCells
+# ----------------------------
+png("NCells_post_filter.png", width = 800, height = 600)
+p <- metadata %>% 
+  ggplot(aes(x=orig.ident, fill=orig.ident)) + 
+  geom_bar() +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +
+  theme(plot.title = element_text(hjust=0.5, face="bold")) +
+  ggtitle("NCells_post_filter")
+print(p)
+dev.off()
+
+# ----------------------------
+# QC: UMI
+# ----------------------------
+png("UMI_post_filter.png", width = 800, height = 600)
+p <- metadata %>% 
+  filter(!is.na(nCount_RNA)) %>% 
+  ggplot(aes(color=orig.ident, x=nCount_RNA + 1, fill=orig.ident)) + 
+  geom_density(alpha = 0.2) +
+  scale_x_log10() +
+  theme_classic() +
+  ylab("Cell density") +
+  geom_vline(xintercept = 500) +
+  ggtitle("UMI_post_filter")
+print(p)
+dev.off()
+
+# ----------------------------
+# QC: Genes per cell
+# ----------------------------
+png("Genes_per_cell_post_filter.png", width = 800, height = 600)
+p <- metadata %>% 
+  filter(!is.na(nFeature_RNA)) %>% 
+  ggplot(aes(color=orig.ident, x=nFeature_RNA + 1, fill=orig.ident)) + 
+  geom_density(alpha = 0.2) +
+  scale_x_log10() +
+  theme_classic() +
+  geom_vline(xintercept = 300) +
+  ggtitle("Genes_per_cell_post_filter")
+print(p)
+dev.off()
+
+# ----------------------------
+# QC: Mito ratio
+# ----------------------------
+png("Mito_ratio_post_filter.png", width = 800, height = 600)
+p <- metadata %>% 
+  filter(!is.na(percent.mt)) %>% 
+  ggplot(aes(color=orig.ident, x=percent.mt + 1e-4, fill=orig.ident)) +  # piccolo offset per log
+  geom_density(alpha = 0.2) +
+  scale_x_log10() +
+  theme_classic() +
+  geom_vline(xintercept = 0.2) +
+  ggtitle("Mito_ratio_post_filter")
+print(p)
+dev.off()
+
+# ----------------------------
+# UMAP
+# ----------------------------
+png("umap_condition_with_clusters_post_filter.png", width = 800, height = 600)
+p <- DimPlot(
+  combined,
+  reduction = "umap",
+  group.by = "Condition"
+)
+print(p)
+dev.off()
+
+#########################################################
+##### PRE VS. POST #############
+# genera 4 png per condizione (in questo caso 8 )
+
+library(ggplot2)
+library(dplyr)
+library(Seurat)
+
+# ----------------------------
+# FUNZIONE QC per lista di oggetti Seurat
+# ----------------------------
+plot_qc_from_list <- function(seurat_list, suffix="pre_filter") {
+
+  # Controlla e calcola percent.mt se manca
+  for (name in names(seurat_list)) {
+    obj <- seurat_list[[name]]
+    if (!"percent.mt" %in% colnames(obj@meta.data)) {
+      obj[["percent.mt"]] <- PercentageFeatureSet(obj, pattern = "^MT-")
+      seurat_list[[name]] <- obj
+    }
+  }
+  
+  # Unisci i metadata in un unico dataframe
+  qc_df <- bind_rows(lapply(names(seurat_list), function(name){
+    df <- seurat_list[[name]]@meta.data
+    df$Sample <- name
+    return(df)
+  }))
+  
+  # ----------------------------
+  # Genes per cell
+  # ----------------------------
+  png(paste0("Genes_per_cell_", suffix, ".png"), width = 1000, height = 600)
+  p <- qc_df %>%
+    filter(!is.na(nFeature_RNA)) %>%
+    ggplot(aes(x=nFeature_RNA + 1, fill=Sample)) +
+    geom_density(alpha=0.3) +
+    scale_x_log10() +
+    theme_classic() +
+    ggtitle(paste("Genes per cell by sample -", suffix))
+  print(p)
+  dev.off()
+  
+  # ----------------------------
+  # UMI per cell
+  # ----------------------------
+  png(paste0("UMI_per_cell_", suffix, ".png"), width = 1000, height = 600)
+  p <- qc_df %>%
+    filter(!is.na(nCount_RNA)) %>%
+    ggplot(aes(x=nCount_RNA + 1, fill=Sample)) +
+    geom_density(alpha=0.3) +
+    scale_x_log10() +
+    theme_classic() +
+    ggtitle(paste("UMI per cell by sample -", suffix))
+  print(p)
+  dev.off()
+  
+  # ----------------------------
+  # Percent.mt
+  # ----------------------------
+  png(paste0("Mito_percent_", suffix, ".png"), width = 1000, height = 600)
+  p <- qc_df %>%
+    filter(!is.na(percent.mt)) %>%
+    ggplot(aes(x=percent.mt + 1e-4, fill=Sample)) +
+    geom_density(alpha=0.3) +
+    theme_classic() +
+    ggtitle(paste("Mitochondrial % by sample -", suffix))
+  print(p)
+  dev.off()
+  
+  # ----------------------------
+  # Numero di cellule per campione
+  # ----------------------------
+  png(paste0("NCells_", suffix, ".png"), width = 1000, height = 600)
+  p <- qc_df %>%
+    group_by(Sample) %>%
+    summarise(NCells = n(), .groups="drop") %>%
+    ggplot(aes(x=Sample, y=NCells, fill=Sample)) +
+    geom_bar(stat="identity") +
+    theme_classic() +
+    theme(axis.text.x = element_text(angle = 45, vjust=1, hjust=1)) +
+    ggtitle(paste("Number of cells per sample -", suffix))
+  print(p)
+  dev.off()
+}
+
+# ----------------------------
+# USO
+# ----------------------------
+# Pre-filter
+plot_qc_from_list(seurat_objects, suffix="pre_filter")
+
+# Post-filter
+plot_qc_from_list(seurat_objects_filtered, suffix="post_filter")
+
+
+
+
+####################################################################
+##### PRE VS. POST COMPARATION 
+# genera 4 png, ogni png contiene  pre + post x 1) mito_percent; 2) Nfeatures; 3)etc....
+
+library(ggplot2)
+library(dplyr)
+library(Seurat)
+
+# ----------------------------
+# FUNZIONE Stacked QC
+# ----------------------------
+plot_stacked_qc_all <- function(pre_list, post_list, suffix="stacked_QC") {
+  
+  # Funzione interna per creare dataframe
+  create_qc_df <- function(seurat_list, label) {
+    df <- bind_rows(lapply(names(seurat_list), function(name){
+      tmp <- seurat_list[[name]]@meta.data
+      tmp$Sample <- name
+      tmp$Filter <- label
+      # Calcola percent.mt se non esiste
+      if (!"percent.mt" %in% colnames(tmp)) {
+        tmp$percent.mt <- PercentageFeatureSet(seurat_list[[name]], pattern="^MT-")
+      }
+      return(tmp)
+    }))
+    return(df)
+  }
+  
+  df_pre <- create_qc_df(pre_list, "Pre-filter")
+  df_post <- create_qc_df(post_list, "Post-filter")
+  
+  qc_df <- bind_rows(df_pre, df_post)
+  
+  # ----------------------------
+  # 1️⃣ NCells
+  # ----------------------------
+  qc_summary <- qc_df %>%
+    group_by(Sample, Filter) %>%
+    summarise(NCells = n(), .groups="drop")
+  
+  png(paste0("NCells_", suffix, ".png"), width = 1000, height = 600)
+  p <- ggplot(qc_summary, aes(x=Sample, y=NCells, fill=Filter)) +
+    geom_bar(stat="identity", position = "dodge") +
+    theme_classic() +
+    theme(axis.text.x = element_text(angle=45, vjust=1, hjust=1)) +
+    ggtitle("Number of cells per sample - Pre vs Post filter")
+  print(p)
+  dev.off()
+  
+  # ----------------------------
+  # 2️⃣ Genes per cell (nFeature_RNA)
+  # ----------------------------
+  png(paste0("Genes_per_cell_", suffix, ".png"), width = 1000, height = 600)
+  p <- qc_df %>%
+    filter(!is.na(nFeature_RNA)) %>%
+    ggplot(aes(x=nFeature_RNA + 1, fill=Filter)) +
+    geom_density(alpha=0.3, position="identity") +
+    scale_x_log10() +
+    facet_wrap(~Sample, scales="free") +
+    theme_classic() +
+    ggtitle("Genes per cell by sample - Pre vs Post filter")
+  print(p)
+  dev.off()
+  
+  # ----------------------------
+  # 3️⃣ UMI per cell (nCount_RNA)
+  # ----------------------------
+  png(paste0("UMI_per_cell_", suffix, ".png"), width = 1000, height = 600)
+  p <- qc_df %>%
+    filter(!is.na(nCount_RNA)) %>%
+    ggplot(aes(x=nCount_RNA + 1, fill=Filter)) +
+    geom_density(alpha=0.3, position="identity") +
+    scale_x_log10() +
+    facet_wrap(~Sample, scales="free") +
+    theme_classic() +
+    ggtitle("UMI per cell by sample - Pre vs Post filter")
+  print(p)
+  dev.off()
+  
+  # ----------------------------
+  # 4️⃣ Percent.mt
+  # ----------------------------
+  png(paste0("Mito_percent_", suffix, ".png"), width = 1000, height = 600)
+  p <- qc_df %>%
+    filter(!is.na(percent.mt)) %>%
+    ggplot(aes(x=percent.mt + 1e-4, fill=Filter)) +
+    geom_density(alpha=0.3, position="identity") +
+    facet_wrap(~Sample, scales="free") +
+    theme_classic() +
+    ggtitle("Mitochondrial % by sample - Pre vs Post filter")
+  print(p)
+  dev.off()
+}
+
+# ----------------------------
+# USO
+# Pre vs Post QC stacked
+plot_stacked_qc_all(seurat_objects, seurat_objects_filtered, suffix="pre_post_comparison")
