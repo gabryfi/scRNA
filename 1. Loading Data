@@ -1,0 +1,45 @@
+
+#### Librerie
+library(Seurat)
+library(harmony)
+library(DoubletFinder)
+library(tibble)
+library(celldex)
+library(SingleR)
+library(ggplot2)
+library(tidyverse)
+library(dplyr)
+library(DESeq2)
+library(limma)
+
+#####################################################################
+#### Creazione Seurat objects da raw counts
+data_dir <- "/home/utenteunifi/data/03_projects_open/pemfigoide_singlecell/10924853/"  # cartella input
+subdirs <- list.dirs(data_dir, recursive = FALSE)
+subdirs <- subdirs[grepl("BP|HC", basename(subdirs))]
+
+seurat_objects <- list()
+
+for (subdir in subdirs) {
+  matrix_file <- file.path(subdir, "matrix.mtx.gz")
+  feature_file <- file.path(subdir, "features.tsv.gz")
+  barcode_file <- file.path(subdir, "barcodes.tsv.gz")
+  
+  if (file.exists(matrix_file) & file.exists(feature_file) & file.exists(barcode_file)) {
+    dataset_name <- basename(subdir)
+    
+    matrix_data <- ReadMtx(
+      mtx = matrix_file,
+      cells = barcode_file,
+      features = feature_file
+    )
+    
+    seu_obj <- CreateSeuratObject(counts = matrix_data, project = dataset_name)
+    seurat_objects[[dataset_name]] <- seu_obj
+  } else {
+    message(paste("File mancanti in:", subdir))
+  }
+}
+
+# Salvataggio degli oggetti raw
+save(seurat_objects, file = file.path(data_dir, "seurat_objects.RData"))
