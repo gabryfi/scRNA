@@ -1,0 +1,57 @@
+###############################################################################
+# 2. Preprocessing per singolo oggetto (Normalize / HVG / Scale)
+###############################################################################
+for(nm in names(seurat_objects_filtered)) {
+  obj <- seurat_objects_filtered[[nm]]
+  message("Preprocessing (Normalize/FindVariable/Scale) for ", nm)
+  
+  obj <- NormalizeData(obj, verbose = FALSE)
+  obj <- FindVariableFeatures(obj, selection.method = "vst", nfeatures = 2000, verbose = FALSE)
+  
+  # regress percent.mt e percent.redcell se presenti
+  vars_to_regress <- intersect(c("percent.mt","percent.redcell"), colnames(obj@meta.data))
+  if(length(vars_to_regress) > 0) {
+    obj <- ScaleData(obj, vars.to.regress = vars_to_regress, verbose = FALSE)
+  } else {
+    obj <- ScaleData(obj, verbose = FALSE)
+  }
+  
+  seurat_objects_filtered[[nm]] <- obj
+}
+
+###############################################################################
+# 3. Merge oggetti filtrati
+###############################################################################
+message("Merging objects...")
+merged_seurat <- merge(x = seurat_objects_filtered[[1]],
+                       y = seurat_objects_filtered[-1],
+                       add.cell.ids = names(seurat_objects_filtered),
+                       project = "IntegratedProject")
+message("Merged object: cells=", ncol(merged_seurat), " genes=", nrow(merged_seurat))
+
+###############################################################################
+# 4. Post-merge preprocessing (Normalize / HVG / Scale / PCA)
+###############################################################################
+merged_seurat <- NormalizeData(merged_seurat, verbose = FALSE)
+merged_seurat <- FindVariableFeatures(merged_seurat, selection.method = "vst", nfeatures = 2000, verbose = FALSE)
+
+vars_to_regress <- intersect(c("percent.mt","percent.redcell"), colnames(merged_seurat@meta.data))
+if(length(vars_to_regress) > 0) {
+  message("Regressing: ", paste(vars_to_regress, collapse=", "))
+  merged_seurat <- ScaleData(merged_seurat, vars.to.regress = vars_to_regress, verbose = FALSE)
+} else {
+  merged_seurat <- ScaleData(merged_seurat, verbose = FALSE)
+}
+
+merged_seurat <- RunPCA(merged_seurat, npcs = 30, verbose = FALSE)
+
+##############################################################################
+
+###############################################################################
+# 5. Salvataggio oggetto merged_seurat finale
+###############################################################################
+saveRDS(merged_seurat, file = file.path(filtered_dir, "merged_seurat_final.rds"))
+save(merged_seurat, file = file.path(filtered_dir, "merged_seurat_final.RData"))
+
+cat("Oggetto merged_seurat salvato in:", filtered_dir, "\n")
+
