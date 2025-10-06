@@ -1,0 +1,52 @@
+##############################################################################
+# 5. Harmony integration
+###############################################################################
+if(!"orig.ident" %in% colnames(merged_seurat@meta.data)) stop("orig.ident missing in metadata")
+message("Running Harmony on 'orig.ident' using dims 1:30 ...")
+merged_seurat <- RunHarmony(merged_seurat, group.by.vars = "orig.ident", dims.use = 1:30, verbose = TRUE)
+
+###############################################################################
+# 6. UMAP + neighbors + clustering
+###############################################################################
+message("Running UMAP (reduction='harmony') and building graph")
+merged_seurat <- RunUMAP(merged_seurat, reduction = "harmony", dims = 1:30, verbose = TRUE)
+merged_seurat <- FindNeighbors(merged_seurat, reduction = "harmony", dims = 1:30, verbose = TRUE)
+
+# Clustering multiple risoluzioni
+resolutions <- c(0.1, 0.2, 0.5)
+for(res in resolutions) {
+  message("Running clustering at resolution=", res)
+  merged_seurat <- FindClusters(merged_seurat, resolution = res, verbose = TRUE)
+}
+
+# Creazione colonne cluster coerenti #un po too much imho bastava aggiungere le colonne 
+#resolutions <- c(0.1, 0.2, 0.3, 0.4, 0.5, 1.0)
+#merged_seurat <- FindClusters(merged_seurat, resolution = resolutions)
+for(res in resolutions) {
+  target_name <- paste0("RNA_snn_res.", res)
+  if(target_name %in% colnames(merged_seurat@meta.data)) chosen <- target_name
+  else chosen <- "seurat_clusters"  # fallback
+  vec <- merged_seurat@meta.data[[chosen]]
+  if(is.data.frame(vec)) vec <- vec[[1]]
+  merged_seurat@meta.data[[paste0("cluster_", res)]] <- factor(vec)
+}
+
+###############################################################################
+# 7. Condition column
+###############################################################################
+merged_seurat$Condition <- ifelse(grepl("BP", merged_seurat$orig.ident), "BP", "HC")
+
+###############################################################################
+# 8. Plot UMAP per cluster e condition
+###############################################################################
+for(res in as.character(resolutions)) {
+  png(file.path(plot_dir, paste0("UMAP_clustering_res_", res, ".png")), width = 900, height = 700)
+  print(DimPlot(merged_seurat, reduction = "umap", group.by = paste0("cluster_", res)) +
+          ggtitle(paste0("UMAP - clustering res=", res)))
+  dev.off()
+}
+
+png(file.path(plot_dir, "UMAP_by_condition.png"), width = 900, height = 700)
+print(DimPlot(merged_seurat, reduction = "umap", group.by = "Condition") +
+        ggtitle("UMAP grouped by Condition"))
+dev.off()
