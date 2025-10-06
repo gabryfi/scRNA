@@ -1,0 +1,34 @@
+#### ISTOGRAMMA CONTE
+
+library(ggplot2)
+library(dplyr)
+
+# Calcola le conte per tipo cellulare e condizione
+cell_counts <- annotated@meta.data %>%
+  group_by(celltype, Condition) %>%
+  summarise(Count = n(), .groups = "drop")
+
+# Calcola la posizione centrale per le etichette sopra le coppie di barre
+label_positions <- cell_counts %>%
+  group_by(celltype) %>%
+  summarise(y_pos = max(Count) + 100, .groups = "drop")  # aggiungi un po' sopra la barra più alta
+
+# Istogramma con barre affiancate
+p_counts <- ggplot(cell_counts, aes(x = celltype, y = Count, fill = Condition)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.8), width = 0.7) +
+  geom_text(data = label_positions, aes(x = celltype, y = y_pos, label = celltype), inherit.aes = FALSE, vjust = 0, size = 3.5) +
+  scale_fill_manual(values = c("BP" = "red", "HC" = "blue")) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_blank(),  # rimuove i nomi sull'asse X
+    axis.ticks.x = element_blank(),
+    axis.title.x = element_blank()
+  ) +
+  labs(y = "Numero di cellule", fill = "Condizione", title = "Conte delle cellule per tipo cellulare e condizione")
+
+# Mostra il plot
+print(p_counts)
+
+# Salva in PNG
+ggsave("cell_counts_barplot_coppie.png", p_counts, width = 10, height = 6, dpi = 300)
+
