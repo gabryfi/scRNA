@@ -1,0 +1,36 @@
+# DOTPLOT
+
+library(ggplot2)
+library(dplyr)
+library(forcats)
+
+
+# Colonna Direction per colore
+all_common <- all_common %>%
+  mutate(Direction = ifelse(log2FoldChange > 0, "Upregulated", "Downregulated"))
+
+# Ordina i geni all’interno di ciascun tipo cellulare per fold change
+all_common <- all_common %>%
+  group_by(CellType) %>%
+  mutate(Gene = factor(Gene, levels = Gene[order(log2FoldChange)])) %>%
+  ungroup()
+
+# Crea il dot plot
+p_celltype_ordered <- ggplot(all_common, aes(x = Gene, y = CellType)) +
+  geom_point(aes(color = Direction, size = abs(log2FoldChange))) +
+  scale_color_manual(values = c("Upregulated" = "red", "Downregulated" = "blue")) +
+  scale_size_continuous(name = "Fold Change") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+  labs(title = "Dot plot di tutti i geni ordinati per fold change entro tipo cellulare",
+       x = "Gene",
+       y = "Cell Type",
+       color = "Regolazione")
+
+# Mostra il plot
+print(p_celltype_ordered)
+
+# Opzionale: salva in PNG
+ggsave("dotplot_all_genes_per_celltype_ordered.png", p_celltype_ordered, 
+       width = max(12, length(unique(all_common$Gene)) * 0.3), 
+       height = max(6, length(unique(all_common$CellType)) * 0.5), dpi = 300)
