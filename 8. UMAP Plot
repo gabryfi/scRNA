@@ -1,85 +1,65 @@
-#########################################################################à
-##########################################################################
-#### UMAP CON ETICHETTE X CELL_TYPE
-
+####   UMAPs per Condition e per Cell Type
+#### ==========================================
 
 library(Seurat)
 library(ggplot2)
 library(dplyr)
-library(scales) # per hue_pal()
-
-# Conta le cellule per CellType
-cell_counts <- table(combined$CellType)
-
-# Seleziona le 20 più numerose
-top20 <- names(sort(cell_counts, decreasing = TRUE)[1:20])
-
-# Creiamo una nuova colonna per le etichette
-combined$CellType_plot <- ifelse(combined$CellType %in% top20, combined$CellType, "Other")
-
-# Trasforma in factor per mantenere ordine
-combined$CellType_plot <- factor(combined$CellType_plot, levels = c(top20, "Other"))
-
-# Genera una palette automatica
-cols <- c(hue_pal()(20), "grey80")  # 20 colori + grigio per "Other"
-
-# Plot
-p <- DimPlot(
-  combined,
-  reduction = "umap",
-  group.by = "CellType_plot",
-  label = TRUE,
-  label.size = 5,
-  repel = TRUE,
-  cols = cols
-)
-
-# Salvataggio grande per leggibilità
-ggsave("umap_top20_celltypes.png", plot = p, width = 20, height = 15, dpi = 300)
-
-
-
-###############################################################
-#### UMAP(solo nomi tipi cellulari )
- 
- library(Seurat)
-library(ggplot2)
-library(dplyr)
 library(RColorBrewer)
 
-# --- Prepara i tipi cellulari principali ---
-# Estrai solo il nome principale (prima dei ":")
-combined$CellType_main <- sapply(strsplit(as.character(combined$CellType), ":"), `[`, 1)
+# --- 1️⃣ UMAP per Condition (HC vs BP) ---
+p_condition <- DimPlot(
+  annotated,
+  reduction = "umap",
+  group.by = "Condition",
+  pt.size = 0.5
+) +
+  ggtitle("UMAP - Condition (HC vs BP)") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    legend.position = "right"
+  )
 
-# Conta le cellule per tipo principale
-cell_counts <- table(combined$CellType_main)
+ggsave(
+  filename = "UMAP_condition_HC_BP.png",
+  plot = p_condition,
+  width = 10, height = 8, dpi = 300
+)
 
-# Seleziona le 20 più numerose
+# --- 2️⃣ UMAP per Cell Types (solo nomi, top 20 + Other) ---
+
+annotated$CellType_main <- sapply(strsplit(as.character(annotated$celltype), ":"), `[`, 1)
+cell_counts <- table(annotated$CellType_main)
 top20 <- names(sort(cell_counts, decreasing = TRUE)[1:20])
 
-# Colonna per il plot: top20 vs Other
-combined$CellType_plot <- ifelse(combined$CellType_main %in% top20, combined$CellType_main, "Other")
-combined$CellType_plot <- factor(combined$CellType_plot, levels = c(top20, "Other"))
+annotated$CellType_plot <- ifelse(
+  annotated$CellType_main %in% top20,
+  annotated$CellType_main,
+  "Other"
+)
+annotated$CellType_plot <- factor(annotated$CellType_plot, levels = c(top20, "Other"))
 
-# --- Definisci la palette colori ---
-# Usa Set3 di RColorBrewer per le prime 12 e aggiungi altri colori per arrivare a 21
 palette_colors <- c(brewer.pal(12, "Set3"), brewer.pal(8, "Paired"), "grey80")
 
-# --- Genera il plot UMAP ---
-p <- DimPlot(
-  combined,
+p_celltype <- DimPlot(
+  annotated,
   reduction = "umap",
   group.by = "CellType_plot",
   label = TRUE,
-  label.size = 5,
   repel = TRUE,
-  cols = palette_colors[1:length(levels(combined$CellType_plot))]
-) + ggtitle("UMAP: Top 20 Cell Types")
+  label.size = 5,
+  cols = palette_colors[1:length(levels(annotated$CellType_plot))]
+) +
+  ggtitle("UMAP - Top 20 Cell Types") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    legend.position = "right"
+  )
 
-# --- Salva il PNG grande per leggibilità ---
 ggsave(
-  filename = "umap_top20_celltypes_clean.png",
-  plot = p,
+  filename = "UMAP_top20_celltypes.png",
+  plot = p_celltype,
   width = 20, height = 15, dpi = 300
 )
 
