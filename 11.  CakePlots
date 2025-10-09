@@ -1,0 +1,56 @@
+####   Grafici a torta per Condition (HC vs BP)
+#### ==========================================
+
+library(Seurat)
+library(ggplot2)
+library(dplyr)
+library(RColorBrewer)
+
+# --- Estrai info principali dal metadata ---
+meta <- annotated[[]] %>%
+  dplyr::select(Condition, celltype) %>%
+  mutate(
+    celltype_main = sapply(strsplit(as.character(celltype), ":"), `[`, 1)
+  )
+
+# --- Conta il numero di cellule per tipo e condizione ---
+cell_counts <- meta %>%
+  group_by(Condition, celltype_main) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  group_by(Condition) %>%
+  mutate(percentage = 100 * n / sum(n))
+
+# --- Definisci una palette condivisa per i tipi cellulari ---
+all_types <- sort(unique(cell_counts$celltype_main))
+palette_colors <- setNames(
+  colorRampPalette(c(brewer.pal(12, "Set3"), brewer.pal(8, "Paired")))(length(all_types)),
+  all_types
+)
+
+# --- Funzione per creare un grafico a torta per una condizione ---
+make_pie <- function(df, condition_label) {
+  ggplot(df %>% filter(Condition == condition_label),
+         aes(x = "", y = percentage, fill = celltype_main)) +
+    geom_bar(stat = "identity", width = 1, color = "white") +
+    coord_polar(theta = "y") +
+    scale_fill_manual(values = palette_colors) +
+    ggtitle(paste("Cell Type Composition -", condition_label)) +
+    theme_void() +
+    theme(
+      plot.title = element_text(hjust = 0.5),
+      legend.position = "right"
+    )
+}
+
+# --- Genera i due grafici ---
+p_BP <- make_pie(cell_counts, "BP")
+p_HC <- make_pie(cell_counts, "HC")
+
+# --- Visualizza affiancati ---
+library(patchwork)
+p_HC + p_BP
+
+# --- Salva i file PNG ---
+ggsave("Pie_HC.png", p_HC, width = 8, height = 8, dpi = 300)
+ggsave("Pie_BP.png", p_BP, width = 8, height = 8, dpi = 300)
+
