@@ -1,36 +1,107 @@
-# DOTPLOT
+####   DotPlot basato su espressione media
+#### ==========================================
 
-library(ggplot2)
+library(Seurat)
 library(dplyr)
+library(ggplot2)
 library(forcats)
 
+# --- Geni di interesse ---
+all_markers <- c("KRT1","KRT5","KRT10","KRT14","DCN","COL1A1","COL1A2",
+                 "PTPRC","CD68","CD1C","CD3D","GNLY","NKG7","CD93","ACKR1",
+                 "AQP1","CCL21","LYVE1","TFF3","TYRP1","PMEL","DCT","DCD",
+                 "KRT19","AQP5","TAGLN","ACTA2","TPM2")
 
-# Colonna Direction per colore
-all_common <- all_common %>%
-  mutate(Direction = ifelse(log2FoldChange > 0, "Upregulated", "Downregulated"))
+# --- 1️⃣ Dotplot per top20 tipi cellulari ---
+cell_counts <- table(annotated$celltype)
+top20 <- names(sort(cell_counts, decreasing = TRUE)[1:20])
 
-# Ordina i geni all’interno di ciascun tipo cellulare per fold change
+fold_exp_list <- list()
+
+for (ct in top20) {
+  cells_ct <- WhichCells(annotated, expression = celltype == ct)
+  expr_ct <- GetAssayData(annotated, layer = "data")[all_markers, cells_ct, drop = FALSE]
+
+  # Calcola espressione media per ciascun gene nel tipo cellulare
+  mean_expr <- rowMeans(expr_ct)
+ 
+  df_ct <- data.frame(
+    Gene = all_markers,
+    CellType = ct,
+    MeanExpression = mean_expr
+  )
+ 
+  fold_exp_list[[ct]] <- df_ct
+}
+
+all_common <- do.call(rbind, fold_exp_list)
+
+# Ordina geni entro ciascun tipo cellulare
 all_common <- all_common %>%
   group_by(CellType) %>%
-  mutate(Gene = factor(Gene, levels = Gene[order(log2FoldChange)])) %>%
+  mutate(Gene = factor(Gene, levels = Gene[order(MeanExpression, decreasing = TRUE)])) %>%
   ungroup()
 
-# Crea il dot plot
-p_celltype_ordered <- ggplot(all_common, aes(x = Gene, y = CellType)) +
-  geom_point(aes(color = Direction, size = abs(log2FoldChange))) +
-  scale_color_manual(values = c("Upregulated" = "red", "Downregulated" = "blue")) +
-  scale_size_continuous(name = "Fold Change") +
+# Dotplot
+p_celltype_expr <- ggplot(all_common, aes(x = Gene, y = CellType)) +
+  geom_point(aes(size = MeanExpression, color = MeanExpression)) +
+  scale_color_gradient(low = "lightblue", high = "red") +
+  scale_size_continuous(name = "Media espressione") +
   theme_bw() +
   theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
-  labs(title = "Dot plot di tutti i geni ordinati per fold change entro tipo cellulare",
-       x = "Gene",
-       y = "Cell Type",
-       color = "Regolazione")
+  labs(
+    title = "Dot plot: espressione media dei marker per top20 tipi cellulari",
+    x = "Gene",
+    y = "Tipo cellulare",
+    color = "Media espressione"
+  )
 
-# Mostra il plot
-print(p_celltype_ordered)
+print(p_celltype_expr)
+ggsave("dotplot_mean_expression_top20_celltypes.png", p_celltype_expr,
+       width = 12, height = 8, dpi = 300)
 
-# Opzionale: salva in PNG
-ggsave("dotplot_all_genes_per_celltype_ordered.png", p_celltype_ordered, 
-       width = max(12, length(unique(all_common$Gene)) * 0.3), 
-       height = max(6, length(unique(all_common$CellType)) * 0.5), dpi = 300)
+# --- 2️⃣ Dotplot per cluster ---
+clusters <- sort(unique(annotated$seurat_clusters))
+fold_exp_list2 <- list()
+
+for (cl in clusters) {
+  cells_cl <- WhichCells(annotated, expression = seurat_clusters == cl)
+  expr_cl <- GetAssayData(annotated, layer = "data")[all_markers, cells_cl, drop = FALSE]
+ 
+  mean_expr <- rowMeans(expr_cl)
+ 
+  df_cl <- data.frame(
+    Gene = all_markers,
+    Cluster = cl,
+    MeanExpression = mean_expr
+  )
+ 
+  fold_exp_list2[[as.character(cl)]] <- df_cl
+}
+
+all_common2 <- do.call(rbind, fold_exp_list2)
+
+# Ordina geni entro ciascun cluster
+all_common2 <- all_common2 %>%
+  group_by(Cluster) %>%
+  mutate(Gene = factor(Gene, levels = Gene[order(MeanExpression, decreasing = TRUE)])) %>%
+  ungroup()
+
+# Dotplot
+p_cluster_expr <- ggplot(all_common2, aes(x = Gene, y = factor(Cluster))) +
+  geom_point(aes(size = MeanExpression, color = MeanExpression)) +
+  scale_color_gradient(low = "lightblue", high = "red") +
+  scale_size_continuous(name = "Media espressione") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+  labs(
+    title = "Dot plot: espressione media dei marker per cluster",
+    x = "Gene",
+    y = "Cluster",
+    color = "Media espressione"
+  )
+
+print(p_cluster_expr)
+ggsave("dotplot_mean_expression_clusters.png", p_cluster_expr,
+       width = 12, height = 8, dpi = 300)
+
