@@ -1,34 +1,41 @@
-#### ISTOGRAMMA CONTE
+####   Barplot conte cellule per tipo e condizione
+#### ==========================================
 
 library(ggplot2)
 library(dplyr)
 
-# Calcola le conte per tipo cellulare e condizione
+# --- Calcola le conte per tipo cellulare e condizione ---
 cell_counts <- annotated@meta.data %>%
   group_by(celltype, Condition) %>%
-  summarise(Count = n(), .groups = "drop")
+  summarise(Count = n(), .groups = "drop") %>%
+  # Estrai solo il nome principale (prima dei ":") per uniformità
+  mutate(celltype_main = sapply(strsplit(as.character(celltype), ":"), `[`, 1))
 
-# Calcola la posizione centrale per le etichette sopra le coppie di barre
+# --- Calcola posizione centrale per le etichette sull'asse X ---
 label_positions <- cell_counts %>%
-  group_by(celltype) %>%
-  summarise(y_pos = max(Count) + 100, .groups = "drop")  # aggiungi un po' sopra la barra più alta
+  group_by(celltype_main) %>%
+  summarise(x_pos = mean(as.numeric(factor(celltype_main))), .groups = "drop")
 
-# Istogramma con barre affiancate
-p_counts <- ggplot(cell_counts, aes(x = celltype, y = Count, fill = Condition)) +
+# --- Barplot affiancato ---
+p_counts <- ggplot(cell_counts, aes(x = factor(celltype_main), y = Count, fill = Condition)) +
   geom_bar(stat = "identity", position = position_dodge(width = 0.8), width = 0.7) +
-  geom_text(data = label_positions, aes(x = celltype, y = y_pos, label = celltype), inherit.aes = FALSE, vjust = 0, size = 3.5) +
   scale_fill_manual(values = c("BP" = "red", "HC" = "blue")) +
+  labs(
+    y = "Numero di cellule",
+    x = "Tipo cellulare",
+    fill = "Condizione",
+    title = "Conte delle cellule per tipo cellulare e condizione"
+  ) +
   theme_bw() +
   theme(
-    axis.text.x = element_blank(),  # rimuove i nomi sull'asse X
-    axis.ticks.x = element_blank(),
-    axis.title.x = element_blank()
-  ) +
-  labs(y = "Numero di cellule", fill = "Condizione", title = "Conte delle cellule per tipo cellulare e condizione")
+    axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
+    axis.title.x = element_text(face = "bold"),
+    plot.title = element_text(hjust = 0.5)
+  )
 
-# Mostra il plot
+# --- Mostra il plot ---
 print(p_counts)
 
-# Salva in PNG
-ggsave("cell_counts_barplot_coppie.png", p_counts, width = 10, height = 6, dpi = 300)
+# --- Salva il plot in PNG ---
+ggsave("cell_counts_barplot_affiancato.png", p_counts, width = 12, height = 6, dpi = 300)
 
